@@ -19,6 +19,14 @@ interface AuthSocket extends Socket {
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 
+  // Map userId → timeout de remplacement par bot
+  private disconnectTimers = new Map<number, NodeJS.Timeout>();
+  // Map userId → gameId (pour reconnexion)
+  private playerGameMap = new Map<number, number>();
+
+  // Délai de grâce avant remplacement par bot (ms)
+  private readonly GRACE_PERIOD_MS = 15_000;
+
   constructor(
     private gameService: GameService,
     private jwtService: JwtService,
@@ -35,6 +43,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const payload = this.jwtService.verify(token);
       client.userId = payload.sub;
       client.username = payload.username;
+
+      // ── Reconnexion : annuler le timer de remplacement par bot ──
+      if (this.disconnectTimers.has(client.userId)) {
+        clearTimeout(this.disconnectTimers.get(client.userId));
+        this.disconnectTimers.delete(client.userId);
+        console.log(`🔄 Reconnected before grace period: ${client.username}`);
+
+        // Restaurer le gameId et rejoindre la salle automatiquement
+        const gameId = this.playerGameMap.get(client.userId);
+        if (gameId) {
+          client.gameId = gameId;
+          client.join(`game_${gameId}`);
+          await this.emitGameState(gameId);
+        }
+      }
+
       console.log(`✅ Connected: ${client.username} (${client.id})`);
     } catch {
       client.disconnect();
@@ -42,11 +66,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   async handleDisconnect(client: AuthSocket) {
-    console.log(`❌ Disconnected: ${client.username} (${client.id})`);
-    if (client.gameId && client.userId) {
-      await this.gameService.handleDisconnect(client.gameId, client.userId);
-      this.emitGameState(client.gameId);
-    }
+    console.log(`⚡ Disconnected: ${client.username} (${client.id}) — grace period started`);
+
+    if (!client.gameId || !client.userId) return;
+
+    const { userId, gameId } = client;
+
+    // Mémoriser le gameId pour la reconnexion
+    this.playerGameMap.set(userId, gameId);
+
+    // ── Démarrer le timer de grâce ──
+    const timer = setTimeout(async () => {
+      this.disconnectTimers.delete(userId);
+      this.playerGameMap.delete(userId);
+      console.log(`🤖 Grace period expired for userId=${userId} → replacing with bot`);
+      await this.gameService.handleDisconnect(gameId, userId);
+      this.emitGameState(gameId);
+    }, this.GRACE_PERIOD_MS);
+
+    this.disconnectTimers.set(userId, timer);
   }
 
   // ─── Rejoindre la salle ──────────────────────────────────────────
@@ -58,6 +96,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     client.gameId = data.gameId;
     client.join(`game_${data.gameId}`);
+
+    // Annuler le timer de grâce si le joueur rejoint manuellement
+    if (client.userId && this.disconnectTimers.has(client.userId)) {
+      clearTimeout(this.disconnectTimers.get(client.userId));
+      this.disconnectTimers.delete(client.userId);
+      this.playerGameMap.delete(client.userId);
+    }
+
     await this.emitGameState(data.gameId);
   }
 
@@ -71,7 +117,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const session = await this.gameService.startGame(data.gameId);
 
-      // Injecter les callbacks du gateway dans la session
       session.onTurnEnd = (gid) => this.emitGameState(gid);
       session.onGameOver = async (gid) => {
         await this.gameService.endGame(gid);
@@ -119,7 +164,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // ─── Émettre l'état du jeu à toute la salle ──────────────────────
+  // ─── Émettre l'état du jeu ───────────────────────────────────────
 
   async emitGameState(gameId: number) {
     const session = this.gameService.getSession(gameId);
@@ -141,6 +186,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         score: p.score,
         classement: p.classement,
         isRobot: p.user.isRobot,
+        isDisconnected: this.disconnectTimers.has(p.user.id), // ← indique grâce active
         piecesLeft: session?.getPiecesOf(i)?.length ?? 21,
         pieces: session?.getPiecesOf(i)?.map((pc) => ({
           id: pc.id, name: pc.name, blocks: pc.blocks,

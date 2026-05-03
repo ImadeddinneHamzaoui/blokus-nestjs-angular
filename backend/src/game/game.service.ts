@@ -13,7 +13,6 @@ const COLORS = [PlayerColor.BLUE, PlayerColor.YELLOW, PlayerColor.RED, PlayerCol
 
 @Injectable()
 export class GameService {
-  // Sessions actives en mémoire (gameId → BlokusGame)
   private activeSessions = new Map<number, BlokusGame>();
 
   constructor(
@@ -60,13 +59,24 @@ export class GameService {
     return this.getGameWithDetails(gameId);
   }
 
+  // ─── Rejoindre une partie IN_PROGRESS (reconnexion) ─────────────
+
+  async rejoinGame(gameId: number, userId: number): Promise<boolean> {
+    const game = await this.getGameWithDetails(gameId);
+    if (!game) return false;
+    // Vérifier que le joueur était déjà dans cette partie (pas bot)
+    const participant = game.participants.find(
+      (p) => p.user.id === userId && !p.user.isRobot,
+    );
+    return !!participant;
+  }
+
   // ─── Démarrer une partie ─────────────────────────────────────────
 
   async startGame(gameId: number): Promise<BlokusGame> {
     const game = await this.getGameWithDetails(gameId);
     if (!game) throw new NotFoundException('Game not found');
 
-    // Remplir avec des bots si moins de 4 joueurs
     while (game.participants.length < 4) {
       const botName = `Bot_${game.participants.length + 1}`;
       const bot = await this.userService.createRobot(botName);
@@ -101,13 +111,11 @@ export class GameService {
     const piece = session.getPieceOfCurrentUser(pieceId);
     if (!piece) throw new BadRequestException('Piece not found or already used');
 
-    // Appliquer les blocs tels qu'envoyés par le client (après rotation/flip)
     if (blocks?.length) piece.blocks = blocks;
 
     const success = session.placePiece(piece, x, y);
     if (!success) throw new BadRequestException('Invalid placement');
 
-    // Persister le coup en base
     await this.saveMove(session, player, piece, x, y, blocks || piece.blocks);
     await this.gameRepo.save(session.game);
 
@@ -136,7 +144,6 @@ export class GameService {
     await this.gameRepo.save(session.game);
     await this.participantRepo.save(session.game.participants);
 
-    // Mettre à jour les stats des joueurs humains
     const winner = session.game.participants.find((p) => p.classement === 1);
     for (const p of session.game.participants) {
       if (!p.user.isRobot) {
@@ -148,11 +155,17 @@ export class GameService {
     return session;
   }
 
-  // ─── Déconnexion d'un joueur ─────────────────────────────────────
+  // ─── Déconnexion / remplacement par bot ──────────────────────────
+  // Appelé UNIQUEMENT après expiration du délai de grâce (15s)
 
   async handleDisconnect(gameId: number, userId: number): Promise<void> {
     const session = this.activeSessions.get(gameId);
-    if (session) session.replacePlayerByBot(userId);
+    if (!session) return;
+
+    // Ne remplacer que si la partie est en cours
+    if (session.game.status === 'IN_PROGRESS') {
+      session.replacePlayerByBot(userId);
+    }
   }
 
   // ─── Utilitaires ─────────────────────────────────────────────────
