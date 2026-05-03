@@ -40,57 +40,82 @@ export interface PieceInfo {
   template: `
   <div class="game-page">
     <!-- Header -->
-    <header class="game-header">
-      <button class="btn btn-ghost" (click)="router.navigate(['/lobby'])">← Lobby</button>
-      <div class="game-title">
-        <span>Partie #{{ gameId }}</span>
+    <header class="game-header glass">
+      <!-- Timer + titre -->
+      <div style="display:flex; align-items:center; gap:12px">
+        <button class="btn-ghost" (click)="router.navigate(['/lobby'])">← Lobby</button>
+        <div class="game-title">Partie #{{ gameId }}</div>
         @if (gameState()) {
           <span class="move-count">Coup {{ gameState()!.moveNumber }}</span>
         }
       </div>
+
+      <!-- Cartes joueurs centrées -->
+      <div class="player-cards">
+        @if (gameState()) {
+          @for (p of gameState()!.participants; track p.id; let i = $index) {
+            <div class="player-card glass" [class.active]="gameState()!.currentPlayerIndex === i">
+              @if (gameState()!.currentPlayerIndex === i) {
+                <span class="current-turn">▶ Tour</span>
+              }
+              <div class="avatar" [class]="'avatar-' + p.color.toLowerCase()">
+                {{ p.isRobot ? '🤖' : p.username[0].toUpperCase() }}
+              </div>
+              <span class="player-name">{{ p.username }}</span>
+              <small style="font-size:0.7rem; color:#7f8c8d; font-weight:600">{{ p.score }} pts</small>
+            </div>
+          }
+        }
+      </div>
+
+      <!-- Timer -->
       <div class="header-timer">
         @if (timeLeft() > 0) {
-          <span [class.urgent]="timeLeft() < 30">⏱ {{ formatTime(timeLeft()) }}</span>
+          <div class="timer" [class.warning]="timeLeft() < 60" [class.danger]="timeLeft() < 30">
+            ⏱ {{ formatTime(timeLeft()) }}
+          </div>
         }
       </div>
     </header>
 
+    <!-- Layout principal -->
     <div class="game-layout">
+
       <!-- Sidebar gauche : joueurs -->
-      <aside class="players-sidebar">
+      <aside class="players-sidebar glass">
         <h3>Joueurs</h3>
         @if (gameState()) {
           @for (p of gameState()!.participants; track p.id; let i = $index) {
-            <div class="player-item" [class.active]="gameState()!.currentPlayerIndex === i" [class.finished]="gameState()!.status === 'FINISHED'">
+            <div class="player-item" [class.active]="gameState()!.currentPlayerIndex === i">
               <div class="player-color-dot" [class]="'dot-' + p.color.toLowerCase()"></div>
-              <div class="player-info">
-                <span class="player-name">{{ p.username }}{{ p.isRobot ? ' 🤖' : '' }}</span>
-                <span class="player-pieces">{{ p.piecesLeft }} pièces restantes</span>
+              <div class="player-info" style="flex:1; min-width:0">
+                <span class="player-name-sm">{{ p.username }}{{ p.isRobot ? ' 🤖' : '' }}</span>
+                <span class="player-pieces-sm">{{ p.piecesLeft }} pièces</span>
               </div>
-              <div class="player-score">{{ p.score }} pts</div>
+              <div class="player-score-val">{{ p.score }}</div>
             </div>
           }
         }
 
         @if (gameState()?.status === 'WAITING') {
-          <button class="btn btn-primary" style="width:100%; margin-top:1rem" (click)="startGame()">▶ Démarrer</button>
+          <button class="btn-primary" style="width:100%; margin-top:1rem; justify-content:center" (click)="startGame()">▶ Démarrer</button>
         }
         @if (canPlay()) {
-          <button class="btn btn-ghost" style="width:100%; margin-top:0.5rem" (click)="passTurn()">Passer mon tour</button>
+          <button class="btn-ghost" style="width:100%; margin-top:0.5rem; justify-content:center" (click)="passTurn()">Passer le tour</button>
         }
       </aside>
 
       <!-- Plateau de jeu -->
       <main class="board-area">
         @if (!gameState() || gameState()!.status === 'WAITING') {
-          <div class="waiting-screen">
+          <div class="waiting-screen glass">
             <div style="font-size:3rem">⏳</div>
             <h2>En attente des joueurs...</h2>
             <p>{{ gameState()?.participants?.length || 0 }}/4 joueurs connectés</p>
           </div>
         } @else {
           <div class="board-wrapper">
-            <div class="board" [style.grid-template-columns]="'repeat(20, 1fr)'">
+            <div class="board">
               @for (row of boardRows(); track $index; let ri = $index) {
                 @for (cell of row; track $index; let ci = $index) {
                   <div
@@ -108,7 +133,7 @@ export interface PieceInfo {
       </main>
 
       <!-- Sidebar droite : pièces -->
-      <aside class="pieces-sidebar">
+      <aside class="pieces-sidebar glass">
         <h3>Mes pièces</h3>
         @if (myParticipant()) {
           <div class="pieces-grid">
@@ -119,10 +144,10 @@ export interface PieceInfo {
                 (click)="selectPiece(piece)"
               >
                 <div class="piece-preview">
-                  <div class="piece-mini-board">
-                    @for (row of getPiecePreviewRows(piece); track $index; let ri = $index) {
+                  <div class="piece-mini-board" [style.grid-template-columns]="getMiniGridCols(piece)">
+                    @for (row of getPiecePreviewRows(piece); track $index) {
                       @for (filled of row; track $index) {
-                        <div class="mini-cell" [class.filled]="filled" [class]="filled ? 'filled ' + myParticipant()!.color.toLowerCase() : ''"></div>
+                        <div class="mini-cell" [class]="filled ? myParticipant()!.color.toLowerCase() : ''"></div>
                       }
                     }
                   </div>
@@ -131,20 +156,23 @@ export interface PieceInfo {
               </div>
             }
           </div>
+
           @if (selectedPiece()) {
             <div class="piece-controls">
-              <p style="font-size:0.8rem; color:var(--color-text-muted)">Pièce : <strong>{{ selectedPiece()!.name }}</strong></p>
+              <p style="font-size:0.8rem; color:#7f8c8d; font-weight:600">
+                ✅ <strong>{{ selectedPiece()!.name }}</strong>
+              </p>
               <div class="control-btns">
-                <button class="btn btn-ghost" (click)="rotatePiece()">↻ Rotation</button>
-                <button class="btn btn-ghost" (click)="flipPiece()">↔ Miroir</button>
+                <button class="btn-ghost" (click)="rotatePiece()">↻ Rotation</button>
+                <button class="btn-ghost" (click)="flipPiece()">↔ Miroir</button>
               </div>
-              <p style="font-size:0.75rem; color:var(--color-text-muted); margin-top:0.5rem">Cliquez sur le plateau pour placer</p>
+              <p style="font-size:0.72rem; color:#95a5a6; margin-top:0.5rem">Cliquez sur le plateau pour placer</p>
             </div>
           }
         }
 
         @if (gameState()?.status === 'FINISHED') {
-          <div class="results">
+          <div class="results glass">
             <h3>🏆 Résultats</h3>
             @for (p of sortedParticipants(); track p.id) {
               <div class="result-row">
@@ -159,129 +187,7 @@ export interface PieceInfo {
     </div>
   </div>
   `,
-  styles: [`
-    .game-page { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-    .game-header {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 0.75rem 1.5rem;
-      background: var(--color-surface);
-      border-bottom: 1px solid var(--color-border);
-      z-index: 10;
-    }
-    .game-title { font-family: var(--font-display); font-weight: 700; }
-    .move-count { margin-left: 1rem; font-size: 0.8rem; color: var(--color-text-muted); font-family: var(--font-body); font-weight: 400; }
-    .header-timer { font-size: 0.9rem; font-weight: 600; }
-    .header-timer .urgent { color: var(--color-red); animation: pulse 1s ease infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-
-    .game-layout { flex: 1; display: grid; grid-template-columns: 220px 1fr 260px; overflow: hidden; }
-
-    .players-sidebar, .pieces-sidebar {
-      background: var(--color-surface);
-      border-right: 1px solid var(--color-border);
-      padding: 1rem;
-      overflow-y: auto;
-    }
-    .pieces-sidebar { border-right: none; border-left: 1px solid var(--color-border); }
-    .players-sidebar h3, .pieces-sidebar h3 {
-      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em;
-      color: var(--color-text-muted); margin-bottom: 0.75rem;
-    }
-
-    .player-item {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px; border-radius: var(--radius-md);
-      margin-bottom: 4px; transition: background 0.18s;
-    }
-    .player-item.active { background: var(--color-surface-2); }
-    .player-color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-    .dot-blue   { background: var(--color-blue); }
-    .dot-yellow { background: var(--color-yellow); }
-    .dot-red    { background: var(--color-red); }
-    .dot-green  { background: var(--color-green); }
-    .player-info { flex: 1; }
-    .player-name { display: block; font-size: 0.875rem; font-weight: 600; }
-    .player-pieces { font-size: 0.75rem; color: var(--color-text-muted); }
-    .player-score { font-size: 0.875rem; font-weight: 700; color: var(--color-text-muted); }
-
-    .board-area {
-      display: flex; align-items: center; justify-content: center;
-      background: var(--color-bg); padding: 1rem; overflow: hidden;
-    }
-    .board-wrapper { width: 100%; max-width: min(70vh, 100%); aspect-ratio: 1; }
-    .board {
-      display: grid;
-      width: 100%; height: 100%;
-      gap: 1px; background: var(--color-border);
-      border: 1px solid var(--color-border);
-      border-radius: 4px; overflow: hidden;
-    }
-    .cell {
-      background: #1a1a26;
-      cursor: pointer;
-      transition: filter 0.1s;
-    }
-    .cell:hover { filter: brightness(1.4); }
-    .cell.c-blue   { background: var(--color-blue); }
-    .cell.c-yellow { background: var(--color-yellow); }
-    .cell.c-red    { background: var(--color-red); }
-    .cell.c-green  { background: var(--color-green); }
-    .cell.preview  { opacity: 0.5; }
-    .cell.valid-move { background: #2a2a40; }
-
-    .pieces-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-    .piece-card {
-      background: var(--color-surface-2);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      padding: 8px; cursor: pointer;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      transition: all 0.18s;
-    }
-    .piece-card:hover, .piece-card.selected {
-      border-color: var(--color-primary);
-      background: rgba(108,99,255,0.1);
-    }
-    .piece-mini-board {
-      display: grid;
-      gap: 1px;
-    }
-    .mini-cell { width: 8px; height: 8px; background: var(--color-border); border-radius: 1px; }
-    .mini-cell.blue   { background: var(--color-blue); }
-    .mini-cell.yellow { background: var(--color-yellow); }
-    .mini-cell.red    { background: var(--color-red); }
-    .mini-cell.green  { background: var(--color-green); }
-    .piece-name { font-size: 0.65rem; color: var(--color-text-muted); font-weight: 600; }
-
-    .piece-controls {
-      margin-top: 0.75rem; padding: 0.75rem;
-      background: var(--color-surface-2);
-      border-radius: var(--radius-md);
-      border: 1px solid var(--color-primary);
-    }
-    .control-btns { display: flex; gap: 6px; margin-top: 0.5rem; }
-    .control-btns .btn { flex: 1; justify-content: center; font-size: 0.75rem; padding: 6px 8px; }
-
-    .waiting-screen {
-      text-align: center; color: var(--color-text-muted);
-      display: flex; flex-direction: column; align-items: center; gap: 1rem;
-    }
-    .waiting-screen h2 { color: var(--color-text); font-family: var(--font-display); }
-
-    .results {
-      margin-top: 1rem; padding: 1rem;
-      background: var(--color-surface-2);
-      border-radius: var(--radius-md);
-    }
-    .result-row {
-      display: flex; align-items: center; gap: 8px;
-      padding: 6px 0;
-      border-bottom: 1px solid var(--color-border);
-    }
-    .rank { font-weight: 700; width: 24px; color: var(--color-yellow); }
-    .result-name { flex: 1; font-size: 0.875rem; }
-    .result-score { font-weight: 700; color: var(--color-primary); }
-  `],
+  styles: [],
 })
 export class GameComponent implements OnInit, OnDestroy {
   gameId!: number;
@@ -345,7 +251,7 @@ export class GameComponent implements OnInit, OnDestroy {
   // ─── Actions ───────────────────────────────────────────────────
 
   startGame() { this.socket.startGame(this.gameId); }
-  passTurn() { this.socket.passTurn(this.gameId); }
+  passTurn()  { this.socket.passTurn(this.gameId); }
 
   selectPiece(piece: PieceInfo) {
     if (!this.canPlay()) return;
@@ -381,9 +287,8 @@ export class GameComponent implements OnInit, OnDestroy {
 
   getCellClass(value: number, row: number, col: number): string {
     const colors = ['', 'c-blue', 'c-yellow', 'c-red', 'c-green'];
-    if (value > 0) return colors[value];
+    if (value > 0) return colors[value] || '';
 
-    // Prévisualisation de la pièce sélectionnée
     const p = this.selectedPiece();
     const hover = this.hoverCell;
     if (p && hover) {
@@ -396,11 +301,18 @@ export class GameComponent implements OnInit, OnDestroy {
   }
 
   getPiecePreviewRows(piece: PieceInfo): boolean[][] {
+    if (!piece.blocks.length) return [];
     const maxX = Math.max(...piece.blocks.map(([x]) => x));
     const maxY = Math.max(...piece.blocks.map(([, y]) => y));
     const grid = Array.from({ length: maxX + 1 }, () => Array(maxY + 1).fill(false));
     piece.blocks.forEach(([x, y]) => { if (grid[x]) grid[x][y] = true; });
     return grid;
+  }
+
+  getMiniGridCols(piece: PieceInfo): string {
+    if (!piece.blocks.length) return 'repeat(1, 9px)';
+    const maxY = Math.max(...piece.blocks.map(([, y]) => y));
+    return `repeat(${maxY + 1}, 9px)`;
   }
 
   formatTime(s: number): string {
