@@ -18,6 +18,6 @@ import { UserModule } from '../user/user.module';
   ],
   providers: [AuthService, JwtStrategy, LocalStrategy],
   controllers: [AuthController],
-  exports: [AuthService],
+  exports: [AuthService, JwtModule],  // ← JwtModule exporté pour GameModule
 })
 export class AuthModule {}
